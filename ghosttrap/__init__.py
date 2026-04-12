@@ -1,3 +1,3 @@
-from ghosttrap.client import init
+from ghosttrap.client import init, report
 
-__all__ = ["init"]
+__all__ = ["init", "report"]
