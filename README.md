@@ -43,6 +43,12 @@ By default, only log records carrying an exception are reported. Pass `trap_logs
 
 Every report includes the exception type, message, traceback, frames (file/line/function/code), and the server's hostname (`socket.gethostname()`).
 
+## Ad-hoc shell errors (shelved, never streamed)
+
+Errors only stream if the crashing code lives in the repo. Code someone typed — `manage.py shell` / `shell_plus`, `python -c`, piped stdin, a REPL — has no file, no line, no commit, and its author already watched it fail in their own terminal. The SDK detects these processes at `init()` and tags their reports `channel: adhoc`; the server stores them on the same quarantined shelf as browser events (capped, deduped, pull-only via `ghosttrap shelf`) instead of waking the repo's agent. Service processes — web workers, celery, real management commands like `migrate` — stream normally.
+
+Overrides: `GHOSTTRAP_CHANNEL=service` or `GHOSTTRAP_CHANNEL=adhoc` forces the channel; `GHOSTTRAP_DISABLE=1` makes `init()` a no-op for that process.
+
 ## Django
 
 ```python
@@ -59,7 +65,7 @@ MIDDLEWARE = [
 
 ## Browser / JavaScript errors (quarantined)
 
-Browser errors are captured but **never stream**. A browser can't hold a secret, so its events are anonymous — and ghosttrap streams carry agent-to-agent messages that agents act on. Rather than let anonymous text into that channel, browser events go to a quarantined shelf: stored server-side, capped and deduped, never fanned out to `peek`/`watch`, never touching the cursor. Retrieval is pull-only via `ghosttrap jslogs` (from ghosttrap-cli), which labels them as untrusted telemetry.
+Browser errors are captured but **never stream**. A browser can't hold a secret, so its events are anonymous — and ghosttrap streams carry agent-to-agent messages that agents act on. Rather than let anonymous text into that channel, browser events go to a quarantined shelf: stored server-side, capped and deduped, never fanned out to `peek`/`watch`, never touching the cursor. Retrieval is pull-only via `ghosttrap shelf` (from ghosttrap-cli), which labels them as untrusted telemetry.
 
 Wiring is the same two lines as before:
 

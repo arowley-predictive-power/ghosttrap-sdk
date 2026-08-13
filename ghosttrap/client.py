@@ -20,6 +20,7 @@ caught exception or a non-exception condition, call ghosttrap.trap().
 
 import json
 import logging
+import os
 import socket
 import sys
 import threading
@@ -34,6 +35,31 @@ _original_threading_excepthook = None
 _server_name = None
 _send_user = False
 _trap_logs = False
+_channel = "service"
+
+
+def _detect_channel():
+    """Classify how this process was started.
+
+    "adhoc" marks code that has no home in the repo — a REPL,
+    `manage.py shell`/`shell_plus`, `python -c`, or piped stdin. Errors
+    from adhoc processes are shelved server-side (pull-only, never
+    streamed): their author already watched them fail, so streaming them
+    would only wake the repo's agent for code it cannot open or fix.
+    Override with GHOSTTRAP_CHANNEL=service|adhoc.
+    """
+    env = os.environ.get("GHOSTTRAP_CHANNEL", "").strip().lower()
+    if env in ("service", "adhoc"):
+        return env
+    argv = sys.argv or [""]
+    if os.path.basename(argv[0] or "") == "manage.py" \
+            and len(argv) > 1 and argv[1] in ("shell", "shell_plus"):
+        return "adhoc"
+    if argv[0] in ("-c", "-", ""):
+        return "adhoc"
+    if sys.flags.interactive or hasattr(sys, "ps1"):
+        return "adhoc"
+    return "service"
 
 
 def init(dsn, server=None, send_user=False, trap_logs=False):
@@ -53,9 +79,16 @@ def init(dsn, server=None, send_user=False, trap_logs=False):
                 LoggedError / LoggedCritical with the log call site as
                 the frame. Default False — in chatty codebases every
                 error-level log line becomes an event, which floods.
+
+    Environment: GHOSTTRAP_DISABLE=1 makes init() a no-op for this
+    process. GHOSTTRAP_CHANNEL=service|adhoc forces the reporting
+    channel instead of auto-detection (see _detect_channel).
     """
     global _endpoint, _original_excepthook, _original_threading_excepthook, \
-        _server_name, _send_user, _trap_logs
+        _server_name, _send_user, _trap_logs, _channel
+    if os.environ.get("GHOSTTRAP_DISABLE", "").strip().lower() in ("1", "true", "yes"):
+        return
+    _channel = _detect_channel()
     if dsn.startswith("http://") or dsn.startswith("https://"):
         _endpoint = dsn.rstrip("/") + "/"
     else:
@@ -211,6 +244,8 @@ def _build_payload(exc_type, exc_value, exc_tb, user=None):
 
 def _post(payload):
     try:
+        if _channel == "adhoc":
+            payload["channel"] = "adhoc"
         req = urllib.request.Request(
             _endpoint,
             data=json.dumps(payload).encode(),
